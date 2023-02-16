@@ -10,7 +10,9 @@ class SsrfFilter
     mask_addr = ipaddr.instance_variable_get('@mask_addr')
     raise ArgumentError, 'Invalid mask' if mask_addr.zero?
 
-    mask_addr >>= 1 while (mask_addr & 0x1).zero?
+    while (mask_addr & 0x1).zero?
+      mask_addr >>= 1
+    end
 
     length = 0
     while mask_addr & 0x1 == 0x1
@@ -81,7 +83,8 @@ class SsrfFilter
     patch: ::Net::HTTP::Patch
   }.freeze
 
-  FIBER_LOCAL_KEY = :__ssrf_filter_hostname
+  FIBER_HOSTNAME_KEY = :__ssrf_filter_hostname
+  FIBER_ADDRESS_KEY = :__ssrf_filter_address
 
   class Error < ::StandardError
   end
@@ -104,7 +107,7 @@ class SsrfFilter
   %i[get put post delete head patch].each do |method|
     define_singleton_method(method) do |url, options = {}, &block|
       ::SsrfFilter::Patch::SSLSocket.apply!
-      ::SsrfFilter::Patch::HTTPGenericRequest.apply!
+      ::SsrfFilter::Patch::Resolv.apply!
 
       original_url = url
       scheme_whitelist = options[:scheme_whitelist] || DEFAULT_SCHEME_WHITELIST
@@ -126,16 +129,8 @@ class SsrfFilter
         public_addresses = ip_addresses.reject(&method(:unsafe_ip_address?))
         raise PrivateIPAddress, "Hostname '#{hostname}' has no public ip addresses" if public_addresses.empty?
 
-        response = fetch_once(uri, public_addresses.sample.to_s, method, options, &block)
-
-        case response
-        when ::Net::HTTPRedirection then
-          url = response['location']
-          # Handle relative redirects
-          url = "#{uri.scheme}://#{hostname}:#{uri.port}#{url}" if url.start_with?('/')
-        else
-          return response
-        end
+        response, url = fetch_once(uri, public_addresses.sample.to_s, method, options, &block)
+        return response if url.nil?
       end
 
       raise TooManyRedirects, "Got #{max_redirects} redirects fetching #{original_url}"
@@ -171,7 +166,7 @@ class SsrfFilter
 
   def self.fetch_once(uri, ip, verb, options, &block)
     if options[:params]
-      params = uri.query ? ::Hash[::URI.decode_www_form(uri.query)] : {}
+      params = uri.query ? ::URI.decode_www_form(uri.query).to_h : {}
       params.merge!(options[:params])
       uri.query = ::URI.encode_www_form(params)
     end
@@ -188,20 +183,25 @@ class SsrfFilter
 
     request.body = options[:body] if options[:body]
 
-    block.call(request) if block_given?
+    options[:request_proc].call(request) if options[:request_proc].respond_to?(:call)
     validate_request(request)
 
     http_options = options[:http_options] || {}
     http_options[:use_ssl] = (uri.scheme == 'https')
 
-    with_forced_hostname(hostname) do
-      ::Net::HTTP.start(uri.hostname, uri.port, http_options) do |http|
-        if options.key?(:stream)
-          http.request(request) do |response|
-            options[:stream].call(response) unless response.is_a?(Net::HTTPRedirection)
+    with_forced_hostname(hostname, ip) do
+      ::Net::HTTP.start(uri.hostname, uri.port, **http_options) do |http|
+        http.request(request) do |response|
+          case response
+          when ::Net::HTTPRedirection
+            url = response['location']
+            # Handle relative redirects
+            url = "#{uri.scheme}://#{hostname}:#{uri.port}#{url}" if url.start_with?('/')
+            return nil, url
+          else
+            block&.call(response)
+            return response, nil
           end
-        else
-          http.request(request)
         end
       end
     end
@@ -221,11 +221,13 @@ class SsrfFilter
   end
   private_class_method :validate_request
 
-  def self.with_forced_hostname(hostname, &_block)
-    ::Thread.current[FIBER_LOCAL_KEY] = hostname
+  def self.with_forced_hostname(hostname, ip, &_block)
+    ::Thread.current[FIBER_HOSTNAME_KEY] = hostname
+    ::Thread.current[FIBER_ADDRESS_KEY] = ip
     yield
   ensure
-    ::Thread.current[FIBER_LOCAL_KEY] = nil
+    ::Thread.current[FIBER_HOSTNAME_KEY] = nil
+    ::Thread.current[FIBER_ADDRESS_KEY] = nil
   end
   private_class_method :with_forced_hostname
 end

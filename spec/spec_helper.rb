@@ -1,20 +1,30 @@
 # frozen_string_literal: true
 
-require 'coveralls'
+require 'pry-byebug'
 require 'simplecov'
-SimpleCov.add_filter('spec')
-Coveralls.wear!
-ENV['COVERALLS_NOISY'] = '1'
+require 'simplecov-lcov'
+SimpleCov.start do
+  SimpleCov::Formatter::LcovFormatter.config do |c|
+    c.report_with_single_file = true
+    c.single_report_path = 'coverage/lcov.info'
+  end
+
+  SimpleCov.formatters = SimpleCov::Formatter::MultiFormatter.new([
+    SimpleCov::Formatter::HTMLFormatter,
+    SimpleCov::Formatter::LcovFormatter
+  ])
+  add_filter %w[spec]
+end
 require 'webmock/rspec'
 require 'ssrf_filter'
 
 def allow_net_connections_for_context(context)
   context.before :all do
-    WebMock.allow_net_connect!
+    WebMock.disable!
   end
 
   context.after :all do
-    WebMock.disable_net_connect!
+    WebMock.enable!
   end
 end
 

@@ -1,5 +1,14 @@
+### 1.1.1 (8/31/2022)
+* Fix network connection errors if you were making https requests while using [net-http](https://github.com/ruby/net-http) 2.2 or higher ([arkadiyt](https://github.com/arkadiyt/ssrf_filter/pull/54))
+
+### 1.1.0 (8/28/2022)
+* Add support for chunked responses ([mrhaddad](https://github.com/arkadiyt/ssrf_filter/pull/30))
+
+### 1.0.8 (8/3/2022)
+* Add support for HEAD requests ([jakeyheath](https://github.com/arkadiyt/ssrf_filter/pull/38))
+
 ### 1.0.7 (10/21/2019)
-* Allow passing custom options to Net::HTTP.start ([groe](https://github.com/groe))
+* Allow passing custom options to Net::HTTP.start ([groe](https://github.com/arkadiyt/ssrf_filter/pull/26))
 
 ### 1.0.6 (2/24/2018)
 * Backport a fix for a [bug](https://bugs.ruby-lang.org/issues/10054) in Ruby's http library
